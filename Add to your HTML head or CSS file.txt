@@ -1,0 +1,134 @@
+// Add to your HTML <head> or CSS file
+const style = document.createElement('style');
+style.innerHTML = `...`; // styles unchanged for brevity
+
+document.head.appendChild(style);
+
+const toggleButton = document.createElement('button');
+toggleButton.id = 'chatbot-toggle';
+toggleButton.textContent = '💬';
+toggleButton.onclick = () => {
+  const bot = document.getElementById('chatbot');
+  bot.style.display = bot.style.display === 'none' ? 'flex' : 'none';
+};
+document.body.appendChild(toggleButton);
+
+const chatbot = document.createElement('div');
+chatbot.id = 'chatbot';
+chatbot.innerHTML = `...`; // HTML unchanged for brevity
+
+document.body.appendChild(chatbot);
+
+let chatHistory = [];
+
+function detectLanguage(text) {
+  const teluguRegex = /[\u0C00-\u0C7F]/;
+  const tamilRegex = /[\u0B80-\u0BFF]/;
+  const kannadaRegex = /[\u0C80-\u0CFF]/;
+
+  if (teluguRegex.test(text)) return 'te-IN';
+  if (tamilRegex.test(text)) return 'ta-IN';
+  if (kannadaRegex.test(text)) return 'kn-IN';
+  return 'en-IN';
+}
+
+function clearChatHistory() {
+  chatHistory = [];
+  localStorage.removeItem('mrcompare-history');
+  const messages = document.getElementById('chatbot-messages');
+  if (messages) messages.innerHTML = '';
+  const systemNote = document.createElement('div');
+  systemNote.textContent = '🗑️ Chat history cleared.';
+  messages.appendChild(systemNote);
+}
+
+async function sendChatMessage(message = null) {
+  const input = document.getElementById('chatbotText');
+  const messages = document.getElementById('chatbot-messages');
+  let lang = document.getElementById('language-select').value;
+  const userMsg = message || input.value.trim();
+  if (!userMsg) return;
+
+  lang = detectLanguage(userMsg);
+  document.getElementById('language-select').value = lang;
+  chatHistory.push({ role: 'user', content: userMsg });
+
+  const userBubble = document.createElement('div');
+  userBubble.textContent = "🧑‍💻 " + userMsg;
+  messages.appendChild(userBubble);
+
+  const botBubble = document.createElement('div');
+  botBubble.textContent = "🤖 Mr Compare: typing...";
+  messages.appendChild(botBubble);
+  messages.scrollTop = messages.scrollHeight;
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer YOUR_OPENAI_API_KEY"
+      },
+      body: JSON.stringify({
+        model: "gpt-3.5-turbo",
+        messages: [
+          { role: "system", content: `You are Mr Compare, a helpful assistant. Respond in ${lang}` },
+          ...chatHistory
+        ]
+      })
+    });
+
+    const data = await response.json();
+    const botReply = data.choices?.[0]?.message?.content || "Sorry, I couldn't understand that.";
+    botBubble.textContent = "🤖 Mr Compare: " + botReply;
+    chatHistory.push({ role: 'assistant', content: botReply });
+    speak(botReply, lang);
+    localStorage.setItem('mrcompare-history', JSON.stringify(chatHistory));
+
+    // 🔄 Optionally send chat log to backend server for storage or analytics
+    fetch('/api/saveChatLog', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat: chatHistory })
+    });
+  } catch (error) {
+    botBubble.textContent = "🤖 Mr Compare: Sorry, I'm having trouble reaching the server.";
+  }
+
+  input.value = '';
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function startVoiceInput() {
+  const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+  recognition.lang = document.getElementById('language-select').value;
+  recognition.start();
+
+  recognition.onresult = function(event) {
+    const transcript = event.results[0][0].transcript;
+    document.getElementById('chatbotText').value = transcript;
+    sendChatMessage(transcript);
+  };
+
+  recognition.onerror = function(event) {
+    alert('Voice input failed: ' + event.error);
+  };
+}
+
+function speak(text, lang) {
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = lang;
+  window.speechSynthesis.speak(utterance);
+}
+
+window.addEventListener('load', () => {
+  const saved = localStorage.getItem('mrcompare-history');
+  if (saved) chatHistory = JSON.parse(saved);
+
+  const clearButton = document.createElement('button');
+  clearButton.textContent = '🗑️ Clear History';
+  clearButton.style.margin = '5px';
+  clearButton.style.padding = '4px 8px';
+  clearButton.onclick = clearChatHistory;
+  document.getElementById('chatbot').prepend(clearButton);
+});
