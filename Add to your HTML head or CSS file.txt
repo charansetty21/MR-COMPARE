@@ -67,9 +67,14 @@
 <body>
 
 <script>
-  const style = document.createElement('style');
-  document.head.appendChild(style);
+  // Generate or retrieve a session ID (unique per user/session)
+  let sessionId = localStorage.getItem('mrcompare-session-id');
+  if (!sessionId) {
+    sessionId = Date.now().toString() + Math.floor(Math.random()*1000);
+    localStorage.setItem('mrcompare-session-id', sessionId);
+  }
 
+  // Create chatbot toggle button
   const toggleButton = document.createElement('button');
   toggleButton.id = 'chatbot-toggle';
   toggleButton.textContent = '💬';
@@ -79,6 +84,7 @@
   };
   document.body.appendChild(toggleButton);
 
+  // Create chatbot container and inner HTML
   const chatbot = document.createElement('div');
   chatbot.id = 'chatbot';
   chatbot.innerHTML = `
@@ -99,6 +105,7 @@
 
   let chatHistory = [];
 
+  // Language detection function based on Unicode ranges
   function detectLanguage(text) {
     const teluguRegex = /[\u0C00-\u0C7F]/;
     const tamilRegex = /[\u0B80-\u0BFF]/;
@@ -110,13 +117,18 @@
     return 'en-IN';
   }
 
+  // Clear chat history locally and on backend
   function clearChatHistory() {
     chatHistory = [];
     localStorage.removeItem('mrcompare-history');
     const messages = document.getElementById('chatbot-messages');
     messages.innerHTML = '<div>🗑️ Chat history cleared.</div>';
+
+    // Optionally: clear backend history by sending empty chat or implementing clear API
+    // Here we do nothing backend side for simplicity
   }
 
+  // Send chat message to OpenAI API and update history/backend
   async function sendChatMessage(message = null) {
     const input = document.getElementById('chatbotText');
     const messages = document.getElementById('chatbot-messages');
@@ -128,10 +140,12 @@
     document.getElementById('language-select').value = lang;
     chatHistory.push({ role: 'user', content: userMsg });
 
+    // Display user message bubble
     const userBubble = document.createElement('div');
     userBubble.textContent = "🧑‍💻 " + userMsg;
     messages.appendChild(userBubble);
 
+    // Display bot "typing..." bubble
     const botBubble = document.createElement('div');
     botBubble.textContent = "🤖 Mr Compare: typing...";
     messages.appendChild(botBubble);
@@ -142,7 +156,7 @@
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": "Bearer YOUR_OPENAI_API_KEY" // 🔐 Replace this with your real key
+          "Authorization": "Bearer YOUR_OPENAI_API_KEY" // Replace with your OpenAI API key
         },
         body: JSON.stringify({
           model: "gpt-3.5-turbo",
@@ -157,15 +171,19 @@
       const botReply = data.choices?.[0]?.message?.content || "Sorry, I couldn't understand that.";
       botBubble.textContent = "🤖 Mr Compare: " + botReply;
       chatHistory.push({ role: 'assistant', content: botReply });
+
+      // Speak response
       speak(botReply, lang);
+
+      // Save chat history locally
       localStorage.setItem('mrcompare-history', JSON.stringify(chatHistory));
 
-      // 🔄 Send chat log to backend (optional)
+      // Save chat history to backend with sessionId
       fetch('/api/saveChatLog', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat: chatHistory })
-      });
+        body: JSON.stringify({ chat: chatHistory, session_id: sessionId })
+      }).catch(err => console.error('Error saving chat log to backend:', err));
 
     } catch (error) {
       botBubble.textContent = "🤖 Mr Compare: Sorry, I'm having trouble reaching the server.";
@@ -175,6 +193,7 @@
     messages.scrollTop = messages.scrollHeight;
   }
 
+  // Voice input using Web Speech API
   function startVoiceInput() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -197,24 +216,46 @@
     };
   }
 
+  // Text to speech output
   function speak(text, lang) {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = lang;
     window.speechSynthesis.speak(utterance);
   }
 
+  // On window load: fetch chat history from backend, then add clear button
   window.addEventListener('load', () => {
-    const saved = localStorage.getItem('mrcompare-history');
-    if (saved) {
-      chatHistory = JSON.parse(saved);
-      const messages = document.getElementById('chatbot-messages');
-      chatHistory.forEach(msg => {
-        const bubble = document.createElement('div');
-        bubble.textContent = (msg.role === 'user' ? '🧑‍💻 ' : '🤖 Mr Compare: ') + msg.content;
-        messages.appendChild(bubble);
+    fetch(`/api/getChatLog/${sessionId}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.chat && data.chat.length) {
+          chatHistory = data.chat;
+          const messages = document.getElementById('chatbot-messages');
+          messages.innerHTML = ''; // Clear before loading
+          chatHistory.forEach(msg => {
+            const bubble = document.createElement('div');
+            bubble.textContent = (msg.role === 'user' ? '🧑‍💻 ' : '🤖 Mr Compare: ') + msg.content;
+            messages.appendChild(bubble);
+          });
+          localStorage.setItem('mrcompare-history', JSON.stringify(chatHistory));
+        }
+      })
+      .catch(err => {
+        console.error('Failed to load chat history from backend:', err);
+        // fallback to localStorage if backend fails
+        const saved = localStorage.getItem('mrcompare-history');
+        if (saved) {
+          chatHistory = JSON.parse(saved);
+          const messages = document.getElementById('chatbot-messages');
+          chatHistory.forEach(msg => {
+            const bubble = document.createElement('div');
+            bubble.textContent = (msg.role === 'user' ? '🧑‍💻 ' : '🤖 Mr Compare: ') + msg.content;
+            messages.appendChild(bubble);
+          });
+        }
       });
-    }
 
+    // Add Clear History button at top of chatbot
     const clearButton = document.createElement('button');
     clearButton.textContent = '🗑️ Clear History';
     clearButton.style.margin = '5px';
